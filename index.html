@@ -1,34 +1,319 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
- <meta charset="UTF-8" />
- <meta name="viewport" content="width=device-width, initial-scale=1.0" />
- <title>Stay Intelligent – pause, check, confirm</title>
- <style>
- * { box-sizing: border-box; margin: 0; padding: 0; }
- body {
- font-family: system-ui, -apple-system, sans-serif;
- background: #0f0f12;
- color: #f4f4f5;
- min-height: 100vh;
- padding: 16px;
- line-height: 1.5;
- }
- .container { max-width: 640px; margin: 0 auto; }
- h1 { font-size: 1.7rem; font-weight: 700; text-align: center; }
- .tagline { color: #a3e635; text-align: center; font-weight: 600; margin-bottom: 6px; }
- .subtitle { color: #a1a1aa; text-align: center; font-size: 0.9rem; margin-bottom: 28px; }
- textarea, input[type="text"] {
- width: 100%; padding: 14px; border-radius: 14px;
- background: #1a1a21; border: 1px solid #333; color: white;
- font-size: 1rem;
- }
- textarea { height: 150px; resize: vertical; }
- button {
- border: none; border-radius: 14px; padding: 12px 16px;
- font-size: 0.95rem; font-weight: 600; cursor: pointer;
- }
- .btn-primary { background: #8b5cf6; color: white; width: 100%; margin-top: 12px; }
- .btn-lime { background: #a3e635; color: black; width: 100%; }
- .btn-secondary { background: #27272a; color: white; }
- .btn 
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stay Intelligent – pause, check, confirm</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f12;
+      color: #f4f4f5;
+      min-height: 100vh;
+      padding: 16px;
+      line-height: 1.5;
+    }
+    .container { max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 1.75rem; font-weight: 700; text-align: center; margin-bottom: 4px; }
+    .tagline { color: #a3e635; text-align: center; font-weight: 600; margin-bottom: 6px; }
+    .subtitle { color: #a1a1aa; text-align: center; font-size: 0.9rem; margin-bottom: 28px; }
+    textarea, input[type="text"] {
+      width: 100%;
+      padding: 14px;
+      border-radius: 14px;
+      background: #1a1a21;
+      border: 1px solid #333;
+      color: #fff;
+      font-size: 1rem;
+    }
+    textarea { height: 150px; resize: vertical; margin-bottom: 12px; }
+    button {
+      border: none;
+      border-radius: 14px;
+      padding: 13px 16px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary { background: #8b5cf6; color: white; width: 100%; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-lime { background: #a3e635; color: #000; width: 100%; }
+    .btn-secondary { background: #27272a; color: white; }
+    .btn-small { padding: 8px 12px; font-size: 0.85rem; border-radius: 10px; }
+    .claim-card {
+      background: #1a1a21;
+      border: 1px solid #333;
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .claim-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .decision-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .decision-btn {
+      background: #27272a;
+      color: white;
+      padding: 12px 8px;
+      font-size: 0.9rem;
+      border-radius: 12px;
+    }
+    .decision-btn.active { background: #a3e635; color: #000; }
+    .links a {
+      display: inline-block;
+      background: #27272a;
+      color: #a1a1aa;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      text-decoration: none;
+      margin: 4px 4px 4px 0;
+    }
+    .hidden { display: none; }
+    .report-box {
+      background: #1a1a21;
+      border: 1px solid #a3e635;
+      border-radius: 20px;
+      padding: 20px;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Stay Intelligent</h1>
+    <div class="tagline">pause, check, confirm</div>
+    <div class="subtitle">Check AI answers yourself. No automatic scores.</div>
+
+    <!-- STEP 1 -->
+    <div id="step-paste">
+      <textarea id="originalText" placeholder="Paste the AI answer here..."></textarea>
+      <button class="btn-primary" onclick="suggestClaims()">Suggest claims</button>
+    </div>
+
+    <!-- STEP 2 -->
+    <div id="step-select" class="hidden">
+      <h2 style="font-size: 1.2rem; margin-bottom: 6px;">Review suggested claims</h2>
+      <p style="color:#a1a1aa; font-size: 0.9rem; margin-bottom: 14px;">
+        Keep only clear factual statements. Delete the rest or add your own.
+      </p>
+      <button class="btn-secondary btn-small" onclick="addClaim()" style="margin-bottom: 16px;">+ Add your own claim</button>
+      <div id="claimsList"></div>
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn-secondary" style="flex:1" onclick="goToPaste()">Back</button>
+        <button class="btn-primary" style="flex:1" onclick="startChecking()">Check these claims</button>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div id="step-check" class="hidden">
+      <div id="checkList"></div>
+      <button class="btn-lime" id="createReportBtn" onclick="createReport()" disabled style="margin-top: 20px;">
+        Finish all decisions first
+      </button>
+    </div>
+
+    <!-- STEP 4 -->
+    <div id="step-report" class="hidden">
+      <div class="report-box">
+        <div style="color:#a3e635; font-weight:700; margin-bottom:4px;">Human-checked report</div>
+        <div style="color:#a1a1aa; font-size:0.8rem; margin-bottom:16px;">Stay Intelligent · pause, check, confirm</div>
+        <div id="reportContent"></div>
+      </div>
+      <button class="btn-secondary" style="width:100%; margin-top:16px;" onclick="resetAll()">Check another answer</button>
+    </div>
+  </div>
+
+  <script>
+    let originalText = "";
+    let claims = [];
+
+    function suggestClaims() {
+      originalText = document.getElementById("originalText").value.trim();
+      if (!originalText) {
+        alert("Please paste some text first");
+        return;
+      }
+
+      // Improved splitting + scoring
+      const raw = originalText
+        .replace(/\n+/g, ". ")
+        .replace(/\s+/g, " ")
+        .split(/(?<=[.!?])\s+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+      const scored = raw.map(s => {
+        let score = 0;
+        const lower = s.toLowerCase();
+        const wordCount = s.split(/\s+/).length;
+
+        if (wordCount >= 8 && wordCount <= 40) score += 2;
+        if (s.length >= 45 && s.length <= 240) score += 1;
+        if (/\d/.test(s)) score += 3;
+        if (/(19|20)\d{2}/.test(s)) score += 2;
+        if (/\$|£|€|%|percent|subscribers|users|cost|price|launched|founded|signed|guaranteed/.test(lower)) score += 2;
+        if (/\bis\b|\bwas\b|\bhas\b|\bprovides\b|\bused by\b/.test(lower)) score += 1;
+
+        // Penalties
+        if (wordCount < 7) score -= 4;
+        if (s.endsWith(":")) score -= 5;
+        if (/^(it provides|other features|the interface|for example|such as|e\.g\.)/i.test(s)) score -= 3;
+
+        return { text: s, score };
+      });
+
+      claims = scored
+        .filter(item => item.score >= 2)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 7)
+        .map((item, i) => ({
+          id: Date.now() + i,
+          text: item.text,
+          decision: "",
+          note: ""
+        }));
+
+      showStep("select");
+      renderSelect();
+    }
+
+    function renderSelect() {
+      const list = document.getElementById("claimsList");
+      if (claims.length === 0) {
+        list.innerHTML = '<p style="color:#a1a1aa; margin-bottom:12px;">No strong claims found. Please add your own.</p>';
+        return;
+      }
+      list.innerHTML = claims.map(c => `
+        <div class="claim-card">
+          <div>${escapeHtml(c.text)}</div>
+          <div class="claim-actions">
+            <button class="btn-small btn-secondary" onclick="editClaim(${c.id})">Edit</button>
+            <button class="btn-small btn-secondary" onclick="deleteClaim(${c.id})">Delete</button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function editClaim(id) {
+      const claim = claims.find(c => c.id === id);
+      const newText = prompt("Edit claim:", claim.text);
+      if (newText && newText.trim()) {
+        claim.text = newText.trim();
+        renderSelect();
+      }
+    }
+
+    function deleteClaim(id) {
+      claims = claims.filter(c => c.id !== id);
+      renderSelect();
+    }
+
+    function addClaim() {
+      const text = prompt("Type or paste a clear factual claim:");
+      if (text && text.trim()) {
+        claims.push({
+          id: Date.now(),
+          text: text.trim(),
+          decision: "",
+          note: ""
+        });
+        renderSelect();
+      }
+    }
+
+    function startChecking() {
+      if (claims.length === 0) {
+        alert("Add at least one claim first");
+        return;
+      }
+      showStep("check");
+      renderCheck();
+    }
+
+    function renderCheck() {
+      const list = document.getElementById("checkList");
+      list.innerHTML = claims.map((c, index) => {
+        const q = encodeURIComponent(c.text);
+        return `
+          <div class="claim-card" style="margin-bottom:24px;">
+            <div style="color:#a1a1aa; font-size:0.8rem; margin-bottom:6px;">Claim ${index+1} of ${claims.length}</div>
+            <div style="font-weight:500; margin-bottom:12px;">${escapeHtml(c.text)}</div>
+            <div class="links">
+              <a href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener">Google</a>
+              <a href="https://scholar.google.com/scholar?q=${q}" target="_blank" rel="noopener">Scholar</a>
+              <a href="https://www.google.com/search?q=${q}+site:nzhistory.govt.nz+OR+site:teara.govt.nz" target="_blank" rel="noopener">NZ sources</a>
+            </div>
+            <div class="decision-grid">
+              <button class="decision-btn ${c.decision==='Yes, this matches'?'active':''}" onclick="setDecision(${c.id},'Yes, this matches')">Yes, this matches</button>
+              <button class="decision-btn ${c.decision==='Partly correct'?'active':''}" onclick="setDecision(${c.id},'Partly correct')">Partly correct</button>
+              <button class="decision-btn ${c.decision==='No, this is wrong'?'active':''}" onclick="setDecision(${c.id},'No, this is wrong')">No, this is wrong</button>
+              <button class="decision-btn ${c.decision==='I can’t tell'?'active':''}" onclick="setDecision(${c.id},'I can’t tell')">I can’t tell</button>
+            </div>
+            <input type="text" placeholder="Short note (optional)" value="${escapeHtml(c.note)}" oninput="setNote(${c.id}, this.value)">
+          </div>
+        `;
+      }).join("");
+      updateReportButton();
+    }
+
+    function setDecision(id, decision) {
+      const claim = claims.find(c => c.id === id);
+      claim.decision = decision;
+      renderCheck();
+    }
+
+    function setNote(id, note) {
+      const claim = claims.find(c => c.id === id);
+      claim.note = note;
+    }
+
+    function updateReportButton() {
+      const allDone = claims.every(c => c.decision);
+      const btn = document.getElementById("createReportBtn");
+      btn.disabled = !allDone;
+      btn.textContent = allDone ? "Create report" : "Finish all decisions first";
+    }
+
+    function createReport() {
+      let html = `<div style="margin-bottom:16px; white-space:pre-wrap; opacity:0.85;">${escapeHtml(originalText)}</div>`;
+      claims.forEach((c, i) => {
+        html += `
+          <div style="border-top:1px solid #333; padding-top:12px; margin-top:12px;">
+            <div style="font-weight:500;">${i+1}. ${escapeHtml(c.text)}</div>
+            <div style="color:#a3e635; margin:4px 0;">${escapeHtml(c.decision)}</div>
+            ${c.note ? `<div style="color:#a1a1aa; font-size:0.9rem;">${escapeHtml(c.note)}</div>` : ""}
+          </div>
+        `;
+      });
+      document.getElementById("reportContent").innerHTML = html;
+      showStep("report");
+    }
+
+    function showStep(step) {
+      ["paste","select","check","report"].forEach(s => {
+        document.getElementById("step-" + s).classList.add("hidden");
+      });
+      document.getElementById("step-" + step).classList.remove("hidden");
+    }
+
+    function goToPaste() { showStep("paste"); }
+
+    function resetAll() {
+      document.getElementById("originalText").value = "";
+      claims = [];
+      showStep("paste");
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
