@@ -81,6 +81,59 @@
       padding: 20px;
       margin-top: 16px;
     }
+    .empty-note { color:#a1a1aa; font-size: 0.9rem; margin-bottom:12px; }
+
+    .progress-track {
+      height: 6px;
+      background: #27272a;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 14px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #a3e635;
+      border-radius: 999px;
+      transition: width 0.25s ease;
+    }
+    .dot-nav { display: flex; gap: 6px; justify-content: center; margin-bottom: 18px; flex-wrap: wrap; }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #333; border: none; cursor: pointer; padding: 0;
+      transition: transform 0.15s ease;
+    }
+    .dot.decided { background: #a3e635; }
+    .dot.current { transform: scale(1.5); background: #8b5cf6; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #27272a;
+      color: #d4d4d8;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 10px;
+    }
+    .claim-text-large { font-size: 1.05rem; font-weight: 500; margin-bottom: 14px; }
+    .claim-text-large mark {
+      background: rgba(163, 230, 53, 0.25);
+      color: #d9f99d;
+      padding: 0 2px;
+      border-radius: 4px;
+    }
+    .check-card {
+      background: #1a1a21;
+      border: 1px solid #333;
+      border-radius: 18px;
+      padding: 18px;
+      margin-bottom: 16px;
+      animation: fadeIn 0.2s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .nav-row { display: flex; gap: 10px; margin-top: 16px; }
+    .nav-row button { flex: 1; }
   </style>
 </head>
 <body>
@@ -111,8 +164,14 @@
 
     <!-- STEP 3 -->
     <div id="step-check" class="hidden">
-      <div id="checkList"></div>
-      <button class="btn-lime" id="createReportBtn" onclick="createReport()" disabled style="margin-top: 20px;">
+      <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      <div class="dot-nav" id="dotNav"></div>
+      <div id="checkCard"></div>
+      <div class="nav-row">
+        <button class="btn-secondary" id="prevBtn" onclick="prevClaim()">Back</button>
+        <button class="btn-secondary" id="nextBtn" onclick="nextClaim()">Skip</button>
+      </div>
+      <button class="btn-lime" id="createReportBtn" onclick="createReport()" disabled style="margin-top: 12px;">
         Finish all decisions first
       </button>
     </div>
@@ -132,6 +191,86 @@
     let originalText = "";
     let claims = [];
 
+    // ---------- Claim extraction ----------
+
+    const ABBREV_RE = /\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|e\.g|i\.e|U\.S|U\.K|St|approx|no|fig|vol|Inc|Ltd|Co|approx)\.$/i;
+    const BULLET_RE = /^(?:[-*•‣▪]|\d+[.)])\s+(.*)/;
+
+    function extractSentences(text) {
+      const lines = text.replace(/\r\n/g, "\n").split("\n").map(l => l.trim()).filter(Boolean);
+      const sentences = [];
+
+      lines.forEach(line => {
+        const bulletMatch = line.match(BULLET_RE);
+        const content = bulletMatch ? bulletMatch[1] : line;
+
+        // protect decimals (3.5) and common abbreviations so we don't split on them
+        const protectedText = content.replace(/(\d)\.(\d)/g, "$1\u2038$2");
+
+        const parts = protectedText.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/);
+
+        let buffer = "";
+        parts.forEach(part => {
+          buffer = buffer ? buffer + " " + part : part;
+          if (!ABBREV_RE.test(buffer.trim())) {
+            sentences.push(buffer.trim());
+            buffer = "";
+          }
+        });
+        if (buffer) sentences.push(buffer.trim());
+      });
+
+      return sentences.map(s => s.replace(/\u2038/g, "."));
+    }
+
+    function cleanSentence(s) {
+      return s.replace(/\s+/g, " ").trim();
+    }
+
+    function scoreClaim(s) {
+      const lower = s.toLowerCase();
+      const words = s.split(/\s+/).filter(Boolean);
+      const wordCount = words.length;
+
+      if (wordCount < 6) return -10;
+
+      let score = 0;
+      if (wordCount >= 8 && wordCount <= 35) score += 2;
+      if (s.length >= 40 && s.length <= 260) score += 1;
+
+      if (/\d/.test(s)) score += 3;
+      if (/(19|20)\d{2}/.test(s)) score += 2;
+      if (/\$|£|€|%|percent|km|kg|million|billion|thousand/.test(lower)) score += 2;
+      if (/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/.test(s)) score += 1; // proper-noun-like phrase
+
+      if (/\b(is|was|are|were|has|have|had|provides|includes|requires|costs|launched|founded|signed|introduced|announced|reported|found|shows|states|according to)\b/i.test(s)) score += 1;
+
+      if (/^(for example|such as|in summary|in conclusion|overall|additionally|furthermore|moreover|also|note that|it's worth noting|remember|generally speaking|in general)\b/i.test(s)) score -= 3;
+      if (/\?$/.test(s)) score -= 5;
+      if (/^(please|you should|you can|let's|try|consider|i recommend|i suggest)\b/i.test(s)) score -= 3;
+      if (s.endsWith(":")) score -= 4;
+
+      return score;
+    }
+
+    function dedupeClaims(items) {
+      const seenSets = [];
+      const result = [];
+      items.forEach(item => {
+        const wordSet = new Set(item.text.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+        const isDup = seenSets.some(prev => {
+          const overlap = [...wordSet].filter(w => prev.has(w)).length;
+          const smaller = Math.min(wordSet.size, prev.size) || 1;
+          return overlap / smaller > 0.7;
+        });
+        if (!isDup) {
+          seenSets.push(wordSet);
+          result.push(item);
+        }
+      });
+      return result;
+    }
+
     function suggestClaims() {
       originalText = document.getElementById("originalText").value.trim();
       if (!originalText) {
@@ -139,53 +278,86 @@
         return;
       }
 
-      // Improved splitting + scoring
-      const raw = originalText
-        .replace(/\n+/g, ". ")
-        .replace(/\s+/g, " ")
-        .split(/(?<=[.!?])\s+/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
+      const sentences = extractSentences(originalText).map(cleanSentence).filter(Boolean);
 
-      const scored = raw.map(s => {
-        let score = 0;
-        const lower = s.toLowerCase();
-        const wordCount = s.split(/\s+/).length;
+      const candidates = sentences.map((text, index) => ({
+        text,
+        index,
+        score: scoreClaim(text)
+      })).filter(c => c.score >= 2);
 
-        if (wordCount >= 8 && wordCount <= 40) score += 2;
-        if (s.length >= 45 && s.length <= 240) score += 1;
-        if (/\d/.test(s)) score += 3;
-        if (/(19|20)\d{2}/.test(s)) score += 2;
-        if (/\$|£|€|%|percent|subscribers|users|cost|price|launched|founded|signed|guaranteed/.test(lower)) score += 2;
-        if (/\bis\b|\bwas\b|\bhas\b|\bprovides\b|\bused by\b/.test(lower)) score += 1;
+      const deduped = dedupeClaims(candidates);
 
-        // Penalties
-        if (wordCount < 7) score -= 4;
-        if (s.endsWith(":")) score -= 5;
-        if (/^(it provides|other features|the interface|for example|such as|e\.g\.)/i.test(s)) score -= 3;
-
-        return { text: s, score };
-      });
-
-      claims = scored
-        .filter(item => item.score >= 2)
+      // pick the strongest 8, then restore original reading order
+      const top = deduped
         .sort((a, b) => b.score - a.score)
-        .slice(0, 7)
-        .map((item, i) => ({
-          id: Date.now() + i,
-          text: item.text,
-          decision: "",
-          note: ""
-        }));
+        .slice(0, 8)
+        .sort((a, b) => a.index - b.index);
+
+      claims = top.map((item, i) => ({
+        id: Date.now() + i,
+        text: item.text,
+        decision: "",
+        note: ""
+      }));
 
       showStep("select");
       renderSelect();
     }
 
+    // ---------- Checkability helpers ----------
+
+    function classifyClaim(text) {
+      if (/\b(19|20)\d{2}\b/.test(text)) return { type: "date", label: "Date", icon: "📅" };
+      if (/[$£€]|%|\d/.test(text)) return { type: "numeric", label: "Number", icon: "🔢" };
+      if (/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\b/.test(text)) return { type: "entity", label: "Named", icon: "🏷️" };
+      return { type: "general", label: "General", icon: "💬" };
+    }
+
+    function highlightClaim(text) {
+      const marks = [];
+      let working = text;
+      const patterns = [
+        /\b(?:19|20)\d{2}\b/g,
+        /[$£€]\s?\d[\d,.]*\s?(?:million|billion|thousand)?/gi,
+        /\b\d[\d,.]*\s?%/g,
+        /\b\d[\d,.]*\b/g,
+        /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\b/g
+      ];
+      patterns.forEach(re => {
+        working = working.replace(re, m => {
+          const token = `\u0001${marks.length}\u0002`;
+          marks.push(m);
+          return token;
+        });
+      });
+      let escaped = escapeHtml(working);
+      marks.forEach((m, i) => {
+        escaped = escaped.split(`\u0001${i}\u0002`).join(`<mark>${escapeHtml(m)}</mark>`);
+      });
+      return escaped;
+    }
+
+    function getSourceLinks(text, type) {
+      const q = encodeURIComponent(text);
+      const links = [{ label: "Google", url: `https://www.google.com/search?q=${q}` }];
+      if (type === "date" || type === "numeric") {
+        links.push({ label: "Google News", url: `https://www.google.com/search?q=${q}&tbm=nws` });
+      }
+      if (type === "entity" || type === "general") {
+        links.push({ label: "Wikipedia", url: `https://en.wikipedia.org/w/index.php?search=${q}` });
+      }
+      links.push({ label: "Fact-check", url: `https://www.google.com/search?q=${q}+site:snopes.com+OR+site:apnews.com/hub/ap-fact-check+OR+site:factcheck.org` });
+      links.push({ label: "Scholar", url: `https://scholar.google.com/scholar?q=${q}` });
+      return links;
+    }
+
+    // ---------- UI rendering ----------
+
     function renderSelect() {
       const list = document.getElementById("claimsList");
       if (claims.length === 0) {
-        list.innerHTML = '<p style="color:#a1a1aa; margin-bottom:12px;">No strong claims found. Please add your own.</p>';
+        list.innerHTML = '<p class="empty-note">No strong claims found. Please add your own.</p>';
         return;
       }
       list.innerHTML = claims.map(c => `
@@ -226,50 +398,91 @@
       }
     }
 
+    let currentIndex = 0;
+
     function startChecking() {
       if (claims.length === 0) {
         alert("Add at least one claim first");
         return;
       }
+      currentIndex = claims.findIndex(c => !c.decision);
+      if (currentIndex === -1) currentIndex = 0;
       showStep("check");
-      renderCheck();
+      renderCurrentCheck();
     }
 
-    function renderCheck() {
-      const list = document.getElementById("checkList");
-      list.innerHTML = claims.map((c, index) => {
-        const q = encodeURIComponent(c.text);
-        return `
-          <div class="claim-card" style="margin-bottom:24px;">
-            <div style="color:#a1a1aa; font-size:0.8rem; margin-bottom:6px;">Claim ${index+1} of ${claims.length}</div>
-            <div style="font-weight:500; margin-bottom:12px;">${escapeHtml(c.text)}</div>
-            <div class="links">
-              <a href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener">Google</a>
-              <a href="https://scholar.google.com/scholar?q=${q}" target="_blank" rel="noopener">Scholar</a>
-              <a href="https://www.google.com/search?q=${q}+site:nzhistory.govt.nz+OR+site:teara.govt.nz" target="_blank" rel="noopener">NZ sources</a>
-            </div>
-            <div class="decision-grid">
-              <button class="decision-btn ${c.decision==='Yes, this matches'?'active':''}" onclick="setDecision(${c.id},'Yes, this matches')">Yes, this matches</button>
-              <button class="decision-btn ${c.decision==='Partly correct'?'active':''}" onclick="setDecision(${c.id},'Partly correct')">Partly correct</button>
-              <button class="decision-btn ${c.decision==='No, this is wrong'?'active':''}" onclick="setDecision(${c.id},'No, this is wrong')">No, this is wrong</button>
-              <button class="decision-btn ${c.decision==='I can’t tell'?'active':''}" onclick="setDecision(${c.id},'I can’t tell')">I can’t tell</button>
-            </div>
-            <input type="text" placeholder="Short note (optional)" value="${escapeHtml(c.note)}" oninput="setNote(${c.id}, this.value)">
+    function renderDotNav() {
+      const dotNav = document.getElementById("dotNav");
+      dotNav.innerHTML = claims.map((c, i) => `
+        <button class="dot ${c.decision ? "decided" : ""} ${i === currentIndex ? "current" : ""}"
+          onclick="goToClaim(${i})" aria-label="Claim ${i+1}"></button>
+      `).join("");
+    }
+
+    function renderCurrentCheck() {
+      const c = claims[currentIndex];
+      const meta = classifyClaim(c.text);
+      const links = getSourceLinks(c.text, meta.type);
+
+      const decidedCount = claims.filter(cl => cl.decision).length;
+      document.getElementById("progressFill").style.width = `${(decidedCount / claims.length) * 100}%`;
+      renderDotNav();
+
+      document.getElementById("checkCard").innerHTML = `
+        <div class="check-card">
+          <div class="badge">${meta.icon} ${meta.label} claim · ${currentIndex+1} of ${claims.length}</div>
+          <div class="claim-text-large">${highlightClaim(c.text)}</div>
+          <div class="links">
+            ${links.map(l => `<a href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`).join("")}
           </div>
-        `;
-      }).join("");
+          <div class="decision-grid">
+            <button class="decision-btn ${c.decision==='Yes, this matches'?'active':''}" onclick="setDecision('Yes, this matches')">Yes, this matches</button>
+            <button class="decision-btn ${c.decision==='Partly correct'?'active':''}" onclick="setDecision('Partly correct')">Partly correct</button>
+            <button class="decision-btn ${c.decision==='No, this is wrong'?'active':''}" onclick="setDecision('No, this is wrong')">No, this is wrong</button>
+            <button class="decision-btn ${c.decision==='I can’t tell'?'active':''}" onclick="setDecision('I can’t tell')">I can’t tell</button>
+          </div>
+          <input type="text" placeholder="Short note — e.g. where you confirmed it (optional)" value="${escapeHtml(c.note)}" oninput="setNote(this.value)">
+        </div>
+      `;
+
+      document.getElementById("prevBtn").disabled = currentIndex === 0;
+      document.getElementById("prevBtn").style.opacity = currentIndex === 0 ? "0.4" : "1";
+      document.getElementById("nextBtn").textContent = currentIndex === claims.length - 1 ? "Stay here" : "Skip";
+      document.getElementById("nextBtn").disabled = currentIndex === claims.length - 1;
+
       updateReportButton();
     }
 
-    function setDecision(id, decision) {
-      const claim = claims.find(c => c.id === id);
-      claim.decision = decision;
-      renderCheck();
+    function goToClaim(index) {
+      currentIndex = index;
+      renderCurrentCheck();
     }
 
-    function setNote(id, note) {
-      const claim = claims.find(c => c.id === id);
-      claim.note = note;
+    function prevClaim() {
+      if (currentIndex > 0) { currentIndex--; renderCurrentCheck(); }
+    }
+
+    function nextClaim() {
+      if (currentIndex < claims.length - 1) { currentIndex++; renderCurrentCheck(); }
+    }
+
+    function setDecision(decision) {
+      claims[currentIndex].decision = decision;
+      // auto-advance to the next undecided claim after a short beat
+      const nextUndecided = claims.findIndex((c, i) => i > currentIndex && !c.decision);
+      setTimeout(() => {
+        if (nextUndecided !== -1) {
+          currentIndex = nextUndecided;
+        } else if (currentIndex < claims.length - 1) {
+          currentIndex++;
+        }
+        renderCurrentCheck();
+      }, 280);
+      renderCurrentCheck(); // instant feedback on the active button before advancing
+    }
+
+    function setNote(note) {
+      claims[currentIndex].note = note;
     }
 
     function updateReportButton() {
