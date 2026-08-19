@@ -134,6 +134,52 @@
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     .nav-row { display: flex; gap: 10px; margin-top: 16px; }
     .nav-row button { flex: 1; }
+    .query-label { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 6px; }
+    .query-label span { font-size: 0.75rem; color: #a1a1aa; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+    .reset-link { background: none; border: none; color: #8b5cf6; font-size: 0.75rem; font-weight: 600; padding: 0; cursor: pointer; }
+    .search-btn {
+      background: #27272a; color: #d4d4d8; border: 1px solid #333;
+      padding: 8px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 600;
+      margin: 4px 6px 4px 0; cursor: pointer;
+    }
+    .search-btn:hover { background: #333; }
+
+    .concept-note {
+      background: #241a0f;
+      border: 1px solid #7c5a1e;
+      color: #f2c879;
+      font-size: 0.82rem;
+      padding: 10px 12px;
+      border-radius: 12px;
+      margin: 10px 0 4px;
+    }
+    .preview-box {
+      background: #14141a;
+      border: 1px solid #2d2d35;
+      border-radius: 14px;
+      padding: 14px;
+      margin-top: 10px;
+    }
+    .preview-title { font-weight: 700; color: #a3e635; margin-bottom: 6px; font-size: 0.95rem; }
+    .preview-extract { font-size: 0.88rem; color: #d4d4d8; margin-bottom: 8px; }
+    .preview-link { font-size: 0.8rem; color: #8b5cf6; text-decoration: none; font-weight: 600; }
+    .preview-loading { color: #a1a1aa; font-size: 0.85rem; }
+    .source-card {
+      border-top: 1px solid #2d2d35;
+      padding-top: 12px;
+      margin-top: 12px;
+    }
+    .source-card:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+    .source-label { font-size: 0.72rem; color: #8b5cf6; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 5px; }
+    .agree-note {
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 8px 10px;
+      border-radius: 10px;
+      margin-bottom: 12px;
+    }
+    .agree-yes { background: rgba(163,230,53,0.12); color: #a3e635; }
+    .agree-diff { background: rgba(139,92,246,0.12); color: #c4b5fd; }
   </style>
 </head>
 <body>
@@ -297,6 +343,7 @@
       claims = top.map((item, i) => ({
         id: Date.now() + i,
         text: item.text,
+        queries: buildQueries(item.text),
         decision: "",
         note: ""
       }));
@@ -338,18 +385,197 @@
       return escaped;
     }
 
-    function getSourceLinks(text, type) {
-      const q = encodeURIComponent(text);
-      const links = [{ label: "Google", url: `https://www.google.com/search?q=${q}` }];
-      if (type === "date" || type === "numeric") {
-        links.push({ label: "Google News", url: `https://www.google.com/search?q=${q}&tbm=nws` });
+    const STOPWORDS = new Set(["a","an","the","is","was","were","are","be","been","being","this","that","these","those","it","its","as","of","to","in","on","for","and","or","but","so","then","because","with","from","by","at","than","which","who","whom","whose","what","when","where","why","how","there","here","not","no","if","while","during","between","into","through","about","above","below","up","down","out","off","over","under","again","once","also","just","only","very","can","will","would","should","could","may","might","must","shall","do","does","did","doing","have","has","had","having","i","you","he","she","we","they","them","his","her","their","our","your","my","me","him","us","probably","actually","really","basically"]);
+
+    function stripFormatting(text) {
+      return text
+        .replace(/\$\$?/g, " ")
+        .replace(/\\\(|\\\)|\\\[|\\\]/g, " ")
+        .replace(/\\[a-zA-Z]+/g, " ")   // \frac, \times, etc.
+        .replace(/[{}]/g, " ")
+        .replace(/[_^]/g, " ")
+        .replace(/[()]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    // Pull out the words worth searching on: numbers/dates and proper-noun-like
+    // words are always kept; everything else is filtered through a stopword list.
+    function extractKeywords(text, maxWords) {
+      const cleaned = stripFormatting(text);
+      const words = cleaned.split(/\s+/).filter(Boolean);
+      const kept = [];
+      words.forEach(w => {
+        const bare = w.replace(/[^\w%$£€.]/g, "");
+        if (!bare) return;
+        const lower = bare.toLowerCase();
+        const isSignal = /^\d/.test(bare) || /^[A-Z]/.test(bare);
+        if (isSignal || (!STOPWORDS.has(lower) && bare.length > 2)) {
+          kept.push(bare);
+        }
+      });
+      return kept.slice(0, maxWords).join(" ");
+    }
+
+    function findProperNounPhrase(text) {
+      const match = stripFormatting(text).match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}\b/);
+      return match ? match[0] : "";
+    }
+
+    // Builds a tailored query per search engine — Google gets natural phrasing,
+    // Scholar/compare-sources get dense keyword or topic-style phrasing.
+    function buildQueries(text) {
+      const google = (() => {
+        const c = stripFormatting(text);
+        const words = c.split(" ");
+        return words.length > 16 ? words.slice(0, 16).join(" ") : c;
+      })();
+      const dense = extractKeywords(text, 8) || google;
+      const topic = findProperNounPhrase(text) || extractKeywords(text, 5) || google;
+      return {
+        google,
+        scholar: dense,
+        compare: topic,
+        factcheck: google
+      };
+    }
+
+    function sourceUrl(source, query) {
+      const q = encodeURIComponent(query);
+      switch (source) {
+        case "google": return `https://www.google.com/search?q=${q}`;
+        case "factcheck": return `https://www.google.com/search?q=${q}+site:snopes.com+OR+site:apnews.com/hub/ap-fact-check+OR+site:factcheck.org`;
+        case "scholar": return `https://scholar.google.com/scholar?q=${q}`;
       }
-      if (type === "entity" || type === "general") {
-        links.push({ label: "Wikipedia", url: `https://en.wikipedia.org/w/index.php?search=${q}` });
+    }
+
+    function getSourceButtons() {
+      return [
+        { source: "compare", label: "Compare sources" },
+        { source: "google", label: "Google" },
+        { source: "factcheck", label: "Fact-check" },
+        { source: "scholar", label: "Scholar" }
+      ];
+    }
+
+    // Claims with no hard numbers/dates/names are relational or conceptual —
+    // no single page will state them verbatim, so flag that up front.
+    function isConceptual(meta) {
+      return meta.type === "general";
+    }
+
+    async function fetchWikiExtract(lang, query) {
+      if (!query || !query.trim()) return { ok: false, reason: "empty query" };
+      try {
+        const apiUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(query)}&gsrlimit=1&prop=extracts&exintro=1&explaintext=1&exsentences=3&format=json&origin=*`;
+        const res = await fetch(apiUrl);
+        if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
+        const data = await res.json();
+        if (data.error) return { ok: false, reason: data.error.info || "API error" };
+        const pages = data.query && data.query.pages;
+        const page = pages && Object.values(pages)[0];
+        if (!page || !page.extract) return { ok: false, reason: "no matching article" };
+        return {
+          ok: true,
+          source: lang === "en" ? "Wikipedia" : "Simple Wikipedia",
+          title: page.title,
+          extract: page.extract,
+          url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`
+        };
+      } catch (e) { return { ok: false, reason: e.message || "network/fetch blocked" }; }
+    }
+
+    async function fetchYearFact(year) {
+      try {
+        const res = await fetch(`https://numbersapi.com/${year}/year?json`);
+        if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
+        const data = await res.json();
+        if (!data.found) return { ok: false, reason: "no year trivia found" };
+        return {
+          ok: true,
+          source: "Year facts",
+          title: String(year),
+          extract: data.text,
+          url: `https://numbersapi.com/${year}/year`
+        };
+      } catch (e) { return { ok: false, reason: e.message || "network/fetch blocked" }; }
+    }
+
+    // Crude but honest signal: how much substantive vocabulary two extracts share.
+    function wordOverlapRatio(a, b) {
+      const setA = new Set(a.toLowerCase().split(/\W+/).filter(w => w.length > 4));
+      const setB = new Set(b.toLowerCase().split(/\W+/).filter(w => w.length > 4));
+      if (setA.size === 0 || setB.size === 0) return 0;
+      let overlap = 0;
+      setA.forEach(w => { if (setB.has(w)) overlap++; });
+      return overlap / Math.min(setA.size, setB.size);
+    }
+
+    async function showSourceComparison() {
+      const c = claims[currentIndex];
+      const query = (c.queries && c.queries.compare) || buildQueries(c.text).compare;
+      const box = document.getElementById("previewBox");
+      box.classList.remove("hidden");
+      box.innerHTML = `<div class="preview-loading">Gathering independent sources for "${escapeHtml(query || c.text)}"…</div>`;
+
+      const yearMatch = c.text.match(/\b(19|20)\d{2}\b/);
+      const tasks = [fetchWikiExtract("en", query), fetchWikiExtract("simple", query)];
+      if (yearMatch) tasks.push(fetchYearFact(yearMatch[0]));
+
+      const outcomes = await Promise.all(tasks);
+      console.log("Compare sources outcomes:", outcomes);
+
+      const results = outcomes.filter(r => r.ok);
+      const failures = outcomes.filter(r => !r.ok);
+
+      if (results.length === 0) {
+        const reasonList = failures.map(f => `<li>${escapeHtml(f.reason)}</li>`).join("");
+        box.innerHTML = `
+          <div class="preview-loading">
+            No independent sources came back for this claim.
+            <ul style="margin:8px 0 0 18px; opacity:0.8;">${reasonList}</ul>
+            Try Google or Scholar instead, or verify from domain knowledge.
+          </div>`;
+        return;
       }
-      links.push({ label: "Fact-check", url: `https://www.google.com/search?q=${q}+site:snopes.com+OR+site:apnews.com/hub/ap-fact-check+OR+site:factcheck.org` });
-      links.push({ label: "Scholar", url: `https://scholar.google.com/scholar?q=${q}` });
-      return links;
+
+      let agreementNote = "";
+      const wikiResults = results.filter(r => r.source === "Wikipedia" || r.source === "Simple Wikipedia");
+      if (wikiResults.length === 2) {
+        const overlap = wordOverlapRatio(wikiResults[0].extract, wikiResults[1].extract);
+        agreementNote = overlap > 0.25
+          ? `<div class="agree-note agree-yes">✓ Wikipedia and Simple Wikipedia broadly align</div>`
+          : `<div class="agree-note agree-diff">These two emphasize different things — worth reading both before deciding</div>`;
+      }
+
+      box.innerHTML = agreementNote + results.map(r => `
+        <div class="source-card">
+          <div class="source-label">${escapeHtml(r.source)} · ${escapeHtml(r.title)}</div>
+          <div class="preview-extract">${escapeHtml(r.extract)}</div>
+          <a class="preview-link" href="${r.url}" target="_blank" rel="noopener">Read more →</a>
+        </div>
+      `).join("");
+    }
+
+    function openSearch(source) {
+      const c = claims[currentIndex];
+      if (source === "compare") { showSourceComparison(); return; }
+      const query = (c.queries && c.queries[source]) || buildQueries(c.text)[source];
+      window.open(sourceUrl(source, query), "_blank", "noopener");
+    }
+
+    function toggleEdit() {
+      const box = document.getElementById("editBox");
+      box.classList.toggle("hidden");
+    }
+
+    function setEngineQuery(source, value) {
+      claims[currentIndex].queries[source] = value;
+    }
+
+    function resetQueries() {
+      claims[currentIndex].queries = buildQueries(claims[currentIndex].text);
+      renderCurrentCheck();
     }
 
     // ---------- UI rendering ----------
@@ -391,6 +617,7 @@
         claims.push({
           id: Date.now(),
           text: text.trim(),
+          queries: buildQueries(text.trim()),
           decision: "",
           note: ""
         });
@@ -422,7 +649,8 @@
     function renderCurrentCheck() {
       const c = claims[currentIndex];
       const meta = classifyClaim(c.text);
-      const links = getSourceLinks(c.text, meta.type);
+      if (!c.queries) c.queries = buildQueries(c.text);
+      const buttons = getSourceButtons();
 
       const decidedCount = claims.filter(cl => cl.decision).length;
       document.getElementById("progressFill").style.width = `${(decidedCount / claims.length) * 100}%`;
@@ -432,10 +660,24 @@
         <div class="check-card">
           <div class="badge">${meta.icon} ${meta.label} claim · ${currentIndex+1} of ${claims.length}</div>
           <div class="claim-text-large">${highlightClaim(c.text)}</div>
-          <div class="links">
-            ${links.map(l => `<a href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`).join("")}
+
+          ${isConceptual(meta) ? `<div class="concept-note">This is a conceptual claim — no single search result will state it word-for-word. Use the links to read the underlying principle and judge for yourself, rather than looking for an exact match.</div>` : ""}
+
+          <div class="links" style="margin-top:8px;">
+            ${buttons.map(b => `<button class="search-btn" onclick="openSearch('${b.source}')">${escapeHtml(b.label)}</button>`).join("")}
           </div>
-          <div class="decision-grid">
+          <div id="previewBox" class="preview-box hidden"></div>
+          <button class="reset-link" style="margin-top:8px;" onclick="toggleEdit()">Edit search terms</button>
+
+          <div id="editBox" class="hidden" style="margin-top:10px;">
+            ${buttons.map(b => `
+              <div class="query-label"><span>${escapeHtml(b.label)}</span></div>
+              <input type="text" value="${escapeHtml(c.queries[b.source] || "")}" oninput="setEngineQuery('${b.source}', this.value)">
+            `).join("")}
+            <button class="reset-link" style="margin-top:8px;" onclick="resetQueries()">Reset to auto-generated</button>
+          </div>
+
+          <div class="decision-grid" style="margin-top:16px;">
             <button class="decision-btn ${c.decision==='Yes, this matches'?'active':''}" onclick="setDecision('Yes, this matches')">Yes, this matches</button>
             <button class="decision-btn ${c.decision==='Partly correct'?'active':''}" onclick="setDecision('Partly correct')">Partly correct</button>
             <button class="decision-btn ${c.decision==='No, this is wrong'?'active':''}" onclick="setDecision('No, this is wrong')">No, this is wrong</button>
